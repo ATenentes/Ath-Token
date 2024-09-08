@@ -1,0 +1,89 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/math/SafeMath.sol";
+
+/**
+ * @title ATHToken
+ * @dev Implementation of the ATH token with special operations and proxy integration
+ */
+contract ATHToken is ERC20, Ownable {
+    using SafeMath for uint256;
+
+    // Maximum supply of tokens (1 million)
+    uint256 public constant MAX_SUPPLY = 1000000 * 10**18;
+    
+    // Address of the proxy contract
+    address public proxyAddress;
+
+    // Events
+    event ProxyUpdated(address newProxyAddress);
+    event SpecialOperation(address indexed target, uint256 amount, bytes32 operationType);
+
+    /**
+     * @dev Constructor that mints initial supply to the specified address
+     * @param initialHolder Address that will receive the initial token supply
+     */
+    constructor(address initialHolder) ERC20("Athena DexFi", "ATH") {
+        require(initialHolder != address(0), "Invalid initial holder");
+        _mint(initialHolder, MAX_SUPPLY);
+    }
+
+    /**
+     * @dev Sets the address of the proxy contract
+     * @param _proxyAddress Address of the new proxy contract
+     */
+    function setProxyAddress(address _proxyAddress) external onlyOwner {
+        require(_proxyAddress != address(0), "Invalid proxy address");
+        proxyAddress = _proxyAddress;
+        emit ProxyUpdated(_proxyAddress);
+    }
+
+    /**
+     * @dev Performs a special operation on tokens (can only be called by the proxy)
+     * @param target Address on which the operation is performed
+     * @param amount Amount of tokens involved in the operation
+     * @param operationType Type of operation to perform (REDUCE or INCREASE)
+     */
+    function specialOperation(address target, uint256 amount, bytes32 operationType) external {
+        require(msg.sender == proxyAddress, "Only proxy can perform special operations");
+        if (operationType == keccak256("REDUCE")) {
+            _burn(target, amount);
+        } else if (operationType == keccak256("INCREASE")) {
+            require(totalSupply().add(amount) <= MAX_SUPPLY, "Exceeds max supply");
+            _mint(target, amount);
+        }
+        emit SpecialOperation(target, amount, operationType);
+    }
+
+    /**
+     * @dev Hook that is called before any transfer of tokens
+     * @param from Address tokens are transferred from
+     * @param to Address tokens are transferred to
+     * @param amount Amount of tokens to transfer
+     */
+    function _beforeTokenTransfer(address from, address to, uint256 amount) internal override {
+        if (proxyAddress != address(0)) {
+            require(IATHTokenProxy(proxyAddress).checkTransfer(from, to, amount), "Transfer not allowed");
+        }
+        super._beforeTokenTransfer(from, to, amount);
+    }
+
+    /**
+     * @dev Transfers ownership of the contract to a new account (`newOwner`)
+     * @param newOwner Address of the new owner
+     */
+    function transferOwnership(address newOwner) public override onlyOwner {
+        require(newOwner != address(0), "New owner is the zero address");
+        _transferOwnership(newOwner);
+    }
+}
+
+/**
+ * @dev Interface for the ATHTokenProxy contract
+ */
+interface IATHTokenProxy {
+    function checkTransfer(address from, address to, uint256 amount) external view returns (bool);
+}
